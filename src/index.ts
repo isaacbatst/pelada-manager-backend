@@ -6,6 +6,8 @@ import session, { SessionOptions } from 'express-session';
 import { Document, Filter, MongoClient, ObjectId } from "mongodb";
 import * as crypto from 'crypto';
 import { GameDay } from "./types";
+import { createServer } from "http";
+import { Server } from "socket.io";
 dotenv.config();
 
 const env = process.env.NODE_ENV || 'development';
@@ -18,6 +20,25 @@ const client = new MongoClient(mongoUrl);
 const db = client.db(mongoDbName);
 
 const app = express();
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: corsOrigins,
+  }
+});
+
+io.on("connection", (socket) => {
+  socket.on("join", (gameDayId: string) => {
+    console.log('join', gameDayId);
+    socket.join(gameDayId);
+  });
+  socket.on("leave", (gameDayId: string) => {
+    console.log('leave', gameDayId);
+    socket.leave(gameDayId);
+  });
+});
+
+
 app.use(cors({
   origin: corsOrigins,
   credentials: true
@@ -40,6 +61,7 @@ const sessionOptions: SessionOptions = {
 if(env === 'production') {
   app.set('trust proxy', 1);
   sessionOptions.cookie!.secure = true;
+  sessionOptions.cookie!.sameSite = 'none';
 }
 
 app.use(session(sessionOptions));
@@ -62,11 +84,13 @@ app.post('/game-days', async (req, res) => {
   const created = await gameDaysCollection.insertOne({
     ...req.body,
     joinCode,
+    joinCodeExpiration: new Date(Date.now() + 24 * 60 * 60 * 1000),
     playedOn: new Date(req.body.playedOn),
   });
 
-  req.session.gameDayId = created.insertedId.toHexString();
 
+  req.session.gameDayId = created.insertedId.toHexString();
+  
   res.status(201).json({
     id: created.insertedId,
     joinCode,
@@ -75,7 +99,10 @@ app.post('/game-days', async (req, res) => {
 
 app.put('/game-days/join/:code', async (req, res) => {
   const gameDay = await gameDaysCollection.findOne({
-    joinCode: req.params.code
+    joinCode: req.params.code,
+    joinCodeExpiration: {
+      $gt: new Date()
+    }
   });
   if (!gameDay) {
     res.status(404).end();
@@ -98,6 +125,7 @@ app.put('/game-days/join/:code', async (req, res) => {
       extraCourts: newCourt
     },
   });
+  io.to(gameDay._id.toHexString()).emit('game-day:updated');
 
   req.session.gameDayId = gameDay._id.toHexString();
   req.session.courtId = courtId.toHexString();
@@ -165,6 +193,8 @@ app.put('/sessions/game-day', async (req, res) => {
     return;
   }
 
+  console.log('update session', req.session)
+
   if(req.body.isLive === false) {
     req.session.destroy((err) => {
       if(err) {
@@ -172,6 +202,7 @@ app.put('/sessions/game-day', async (req, res) => {
       }
     });
   }
+
 
   if(courtId) {
     const result = await gameDaysCollection.updateOne({
@@ -194,6 +225,7 @@ app.put('/sessions/game-day', async (req, res) => {
       return;
     }
 
+    io.to(id).emit('game-day:updated');
     res.status(200).end();
     return;
   }
@@ -208,6 +240,7 @@ app.put('/sessions/game-day', async (req, res) => {
     res.status(404).end();
     return;
   }
+  io.to(id).emit('game-day:updated');
   res.status(200).end();
 });
 
@@ -264,8 +297,8 @@ async function main() {
     await client.connect();
     console.log('Connected to the database');
     const PORT = process.env.PORT || 4000;
-    app.listen(PORT, () => {
-      console.log(`Server is running on port ${PORT}`);
+    httpServer.listen(PORT, () => {
+      console.log(`Server is running on ${PORT}`);
     });
   } catch (e) {
     console.error(e);

@@ -21,6 +21,7 @@ export type GameDay = {
   autoSwitchTeamsPoints: number;
   playedOn: Date;
   joinCode: string;
+  joinCodeExpiration: Date;
   extraCourts?: {
     _id: ObjectId;
     maxPoints: number;
