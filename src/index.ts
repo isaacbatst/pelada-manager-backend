@@ -2,18 +2,48 @@ import cors from "cors";
 import express from "express";
 import 'express-async-errors';
 import { Document, Filter, MongoClient, ObjectId } from "mongodb";
+import dotenv from 'dotenv';
+import session, { SessionOptions } from 'express-session';
+dotenv.config();
 
-const url = 'mongodb://localhost:27017';
-const client = new MongoClient(url);
-const dbName = 'pelada';
-const db = client.db(dbName);
+const env = process.env.NODE_ENV || 'development';
+const mongoUrl = process.env.MONGO_URL || 'mongodb://localhost:27017';
+const mongoDbName = process.env.MONGO_DB_NAME || 'pelada';
+const domain = process.env.DOMAIN || 'localhost';
+
+const client = new MongoClient(mongoUrl);
+const db = client.db(mongoDbName);
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+const sessionOptions: SessionOptions = {
+  secret: process.env.SESSION_SECRET || 'secret',
+  resave: false,
+  saveUninitialized: false,
+  name: 'pelada.sid',
+  cookie: {
+    domain,
+    httpOnly: true,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: '/',
+    sameSite: 'none',
+  }
+}
+
+if(env === 'production') {
+  app.set('trust proxy', 1);
+  sessionOptions.cookie!.secure = true;
+}
+
+app.use(session(sessionOptions));
+
 app.get('/game-days', async (req, res) => {
-  const gameDays = await db.collection('game-days').find({}).toArray();
+  console.log('req.session', req.session);
+  const gameDays = await db.collection('game-days').find({}).sort({
+    playedOn: -1
+  }).toArray();
   res.json(gameDays.map(({ _id, ...data }) => ({
     id: _id,
     ...data,
