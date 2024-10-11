@@ -51,7 +51,10 @@ app.get('/game-days', async (req, res) => {
 })
 
 app.post('/game-days', async (req, res) => {
-  const created = await db.collection('game-days').insertOne(req.body);
+  const created = await db.collection('game-days').insertOne({
+    ...req.body,
+    playedOn: new Date(req.body.playedOn),
+  });
   res.status(201).json({
     id: created.insertedId,
   });
