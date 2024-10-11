@@ -293,6 +293,40 @@ app.put('/players/bulk', async (req, res) => {
   res.status(200).end();
 })
 
+app.post('/migrations/to-database', async (req, res) => {
+  const migrations = await db.collection('migrations').find({}).toArray();
+  if(migrations.find(migration => migration.name === 'to-database')) {
+    res.status(200).end();
+    return;
+  }
+
+  const gameDays = req.body.gameDays;
+  const players = req.body.players;
+  
+  await db.collection('players').deleteMany({});
+  await db.collection('players').insertMany(Object.entries<{ mu: number, sigma: number }>(players).map(([name, { mu, sigma }]) => ({
+    name,
+    mu,
+    sigma,
+  })));
+  await db.collection('game-days').deleteMany({});
+  const gamedaysToInsert = gameDays?.map((gameDay: any) => {
+    // played on is DD/MM/YYYY, we need to instantiate a new Date object with YYYY-MM-DD
+    const playedOn = gameDay.playedOn.split('/').reverse().join('-');
+    return {
+      ...gameDay,
+      playedOn: new Date(playedOn),
+    };
+
+  })
+  await db.collection('game-days').insertMany(gamedaysToInsert);
+  await db.collection('migrations').insertOne({
+    date: new Date(),
+    name: 'to-database',
+  });
+  res.status(201).end();
+})
+
 
 
 async function main() {
