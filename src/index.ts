@@ -38,13 +38,17 @@ io.on("connection", (socket) => {
     console.log('leave', gameDayId);
     socket.leave(gameDayId);
   });
-});
 
+  socket.on("game-day:updated", (gameDayId: string) => {
+    socket.to(gameDayId).emit('game-day:updated');
+  })
+});
 
 app.use(cors({
   origin: corsOrigins,
   credentials: true
 }));
+
 app.use(express.json());
 
 const sessionOptions: SessionOptions = {
@@ -228,7 +232,6 @@ app.put('/sessions/game-day', async (req, res) => {
       return;
     }
 
-    io.to(id).emit('game-day:updated');
     res.status(200).end();
     return;
   }
@@ -243,7 +246,6 @@ app.put('/sessions/game-day', async (req, res) => {
     res.status(404).end();
     return;
   }
-  io.to(id).emit('game-day:updated');
   res.status(200).end();
 });
 
