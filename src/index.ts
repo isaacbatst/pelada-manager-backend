@@ -8,6 +8,8 @@ import * as crypto from 'crypto';
 import { GameDay } from "./types";
 import { createServer } from "http";
 import { Server } from "socket.io";
+import MongoStore from 'connect-mongo';
+
 dotenv.config();
 
 const env = process.env.NODE_ENV || 'development';
@@ -16,8 +18,8 @@ const mongoUrl = process.env.MONGO_URL || 'mongodb://localhost:27017';
 const mongoDbName = process.env.MONGO_DB_NAME || 'pelada';
 const domain = process.env.COOKIE_DOMAIN || '';
 
-const client = new MongoClient(mongoUrl);
-const db = client.db(mongoDbName);
+const mongoClient = new MongoClient(mongoUrl);
+const db = mongoClient.db(mongoDbName);
 
 const app = express();
 const httpServer = createServer(app);
@@ -50,6 +52,10 @@ const sessionOptions: SessionOptions = {
   resave: false,
   saveUninitialized: false,
   name: 'pelada.sid',
+  store: MongoStore.create({
+    client: mongoClient,
+    dbName: mongoDbName,
+  }),
   cookie: {
     domain,
     httpOnly: true,
@@ -69,7 +75,6 @@ app.use(session(sessionOptions));
 const gameDaysCollection = db.collection<GameDay>('game-days');
 
 app.get('/game-days', async (req, res) => {
-  console.log('req.session', req.session);
   const gameDays = await db.collection('game-days').find({}).sort({
     playedOn: -1
   }).toArray();
@@ -193,8 +198,6 @@ app.put('/sessions/game-day', async (req, res) => {
     return;
   }
 
-  console.log('update session', req.session)
-
   if(req.body.isLive === false) {
     req.session.destroy((err) => {
       if(err) {
@@ -294,7 +297,7 @@ app.put('/players/bulk', async (req, res) => {
 
 async function main() {
   try {
-    await client.connect();
+    await mongoClient.connect();
     console.log('Connected to the database');
     const PORT = process.env.PORT || 4000;
     httpServer.listen(PORT, () => {
