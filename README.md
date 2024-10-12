@@ -6,7 +6,8 @@ API para [Pelada Manager](https://github.com/YuriAlessandro/peladaManager) salva
 
 ### API
 
-`npm run dev`
+- Instalar dependências: `npm install`
+- Rodar app: `npm run dev`
 
 ### Banco de dados
 
