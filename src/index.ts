@@ -326,26 +326,27 @@ app.post('/migrations/to-database', async (req, res) => {
     return;
   }
 
-  const gameDays = req.body.gameDays;
-  const players = req.body.players;
+  const { gameDays, players } = req.body;
   
-  await db.collection('players').deleteMany({});
-  await db.collection('players').insertMany(Object.entries<{ mu: number, sigma: number }>(players).map(([name, { mu, sigma }]) => ({
-    name,
-    mu,
-    sigma,
-  })));
-  await db.collection('game-days').deleteMany({});
-  const gamedaysToInsert = gameDays?.map((gameDay: any) => {
-    // played on is DD/MM/YYYY, we need to instantiate a new Date object with YYYY-MM-DD
-    const playedOn = gameDay.playedOn.split('/').reverse().join('-');
-    return {
-      ...gameDay,
-      playedOn: new Date(playedOn),
-    };
+  if(players){
+    await db.collection('players').deleteMany({});
+    await db.collection('players').insertMany(Object.entries<{ mu: number, sigma: number }>(players).map(([name, { mu, sigma }]) => ({
+      name,
+      mu,
+      sigma,
+    })));
+  }
 
-  })
-  await db.collection('game-days').insertMany(gamedaysToInsert);
+  if(gameDays){
+    await db.collection('game-days').deleteMany({});
+    await db.collection('game-days').insertMany(gameDays?.map((gameDay: any) => {
+      const playedOn = gameDay.playedOn.split('/').reverse().join('-');
+      return {
+        ...gameDay,
+        playedOn: new Date(playedOn),
+      };
+    }));
+  }
   await db.collection('migrations').insertOne({
     date: new Date(),
     name: 'to-database',
