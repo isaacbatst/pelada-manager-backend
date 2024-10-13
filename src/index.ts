@@ -165,6 +165,25 @@ app.get('/sessions/game-day', async (req, res) => {
     return;
   }
 
+    const playersRatings = await db
+      .collection("players")
+      .find({
+        name: {
+          $in: gameDay.players.map((player) => player.name),
+        },
+      })
+      .toArray();
+    const playersWithRatings = gameDay.players.map((player) => {
+      const rating = playersRatings.find(
+        (rating) => rating.name === player.name
+      );
+      if (!rating) return player;
+      return {
+        ...player,
+        ...rating,
+      };
+    });
+
   if(req.session.courtId) {
     const courtId = new ObjectId(req.session.courtId);
     const court = gameDay.extraCourts?.find(court => court._id.equals(courtId));
@@ -173,19 +192,7 @@ app.get('/sessions/game-day', async (req, res) => {
       return;
     }
     const otherPlayingTeams = gameDay.extraCourts?.filter(court => !court._id.equals(courtId)).map(court => court.playingTeams).flat() ?? [];
-    const playersRatings = await db.collection('players').find({
-      name: {
-        $in: gameDay.players.map(player => player.name)
-      }
-    }).toArray();
-    const playersWithRatings = gameDay.players.map(player => {
-      const rating = playersRatings.find(rating => rating.name === player.name);
-      if(!rating) return player;
-      return {
-        ...player,
-        ...rating,
-      }
-    });
+
     if(court) {
       res.json({
         id,
@@ -204,8 +211,10 @@ app.get('/sessions/game-day', async (req, res) => {
 
   res.json({
     id,
-    otherPlayingTeams: gameDay.extraCourts?.map(court => court.playingTeams).flat() ?? [],
+    otherPlayingTeams:
+      gameDay.extraCourts?.map((court) => court.playingTeams).flat() ?? [],
     ...gameDay,
+    players: playersWithRatings,
   });
 });
 app.put('/sessions/game-day', async (req, res) => {
