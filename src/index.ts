@@ -263,7 +263,6 @@ app.put('/sessions/game-day', async (req, res) => {
     });
   }
 
-
   const result = await getGameDaysCollection().updateOne({
     _id: new ObjectId(id),
     "extraCourts._id": new ObjectId(courtId),
@@ -293,7 +292,6 @@ app.put('/sessions/game-day/leave', async (req, res) => {
     return;
   }
 
-  // clean playing teams from court
   const result = await getGameDaysCollection().updateOne(
     {
       _id: new ObjectId(req.session.gameDayId),
