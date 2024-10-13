@@ -15,7 +15,6 @@ export type GameDay = {
   maxPoints: number;
   playersPerTeam: string;
   players: GameDayPlayer[];
-  playingTeams: GameDayPlayer[][];
   matches: number;
   isLive: boolean;
   autoSwitchTeamsPoints: number;

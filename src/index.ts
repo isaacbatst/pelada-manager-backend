@@ -135,18 +135,35 @@ app.get('/game-days', async (req, res) => {
 
 app.post('/game-days', async (req, res) => {
   const joinCode = crypto.randomBytes(2).toString('hex').toUpperCase();
+
+  const court = {
+    _id: new ObjectId(),
+    autoSwitchTeamsPoints: req.body.autoSwitchTeamsPoints,
+    maxPoints: req.body.maxPoints,
+    playersPerTeam: req.body.playersPerTeam,
+    playingTeams: req.body.playingTeams,
+  }
+
   const created = await gameDaysCollection.insertOne({
-    ...req.body,
+    _id: new ObjectId(),
+    autoSwitchTeamsPoints: req.body.autoSwitchTeamsPoints,
+    maxPoints: req.body.maxPoints,
+    playersPerTeam: req.body.playersPerTeam,
+    extraCourts: [court],
+    isLive: req.body.isLive,
+    matches: req.body.matches,
+    players: req.body.players,
     joinCode,
     joinCodeExpiration: new Date(Date.now() + 24 * 60 * 60 * 1000),
     playedOn: new Date(req.body.playedOn),
   });
 
-
   req.session.gameDayId = created.insertedId.toHexString();
+  req.session.courtId = court._id.toHexString();
   
   res.status(201).json({
     id: created.insertedId,
+    courtId: court._id,
     joinCode,
   });
 })
@@ -187,7 +204,6 @@ app.put('/game-days/join/:code', async (req, res) => {
     id: gameDay._id,
     courtId,
     otherPlayingTeams: [
-      ...gameDay.playingTeams,
       ...gameDay.extraCourts?.map(court => court.playingTeams).flat() ?? [],
     ],
     ...gameDay,
@@ -226,7 +242,6 @@ app.get('/sessions/game-day', async (req, res) => {
         id,
         courtId,
         otherPlayingTeams: [
-          ...gameDay.playingTeams,
           ...otherPlayingTeams,
         ],
         ...gameDay,
