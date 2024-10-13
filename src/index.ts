@@ -75,51 +75,49 @@ if(env === 'production') {
 }
 
 app.use(session(sessionOptions));
-
-const gameDaysCollection = db.collection<GameDay>('game-days');
-
+const getGameDaysCollection = () => db.collection<GameDay>('game-days');
 const getGameDayPlayersWithRatings = async (gameDayId: ObjectId) => {
-  const result = gameDaysCollection.aggregate([
-    {
-      $match: {
-        _id: gameDayId,
-      },
-    },
-    {
-      $unwind: "$players", 
-    },
-    {
-      $lookup: {
-        from: "players",
-        localField: "players.name",
-        foreignField: "name",
-        as: "playerWithRating",
-      },
-    },
-    {
-      $unwind: "$playerWithRating",
-    },
-    {
-      $addFields: {
-        mergedPlayer: {
-          $mergeObjects: ["$players", "$playerWithRating"],
+  try {
+    const result = await getGameDaysCollection().aggregate([
+      {
+        $match: {
+          _id: gameDayId,
         },
       },
-    },
-    {
-      $group: {
-        _id: "$_id", 
-        players: {
-          $push: "$mergedPlayer",
+      {
+        $unwind: "$players",
+      },
+      {
+        $lookup: {
+          from: "players",
+          localField: "players.name",
+          foreignField: "name",
+          as: "playerWithRating",
         },
       },
-    },
-  ]);
-  if(!result.hasNext()) {
+      {
+        $unwind: "$playerWithRating",
+      },
+      {
+        $addFields: {
+          mergedPlayer: {
+            $mergeObjects: ["$players", "$playerWithRating"],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$_id",
+          players: {
+            $push: "$mergedPlayer",
+          },
+        },
+      },
+    ]).toArray();
+    return result[0]?.players ?? [];
+  } catch {
     return [];
   }
-
-  return (await result.next())?.players ?? [];
 }
 
 
@@ -142,16 +140,16 @@ app.post('/game-days', async (req, res) => {
     maxPoints: req.body.maxPoints,
     playersPerTeam: req.body.playersPerTeam,
     playingTeams: req.body.playingTeams,
+    matches: 0,
   }
 
-  const created = await gameDaysCollection.insertOne({
+  const created = await getGameDaysCollection().insertOne({
     _id: new ObjectId(),
     autoSwitchTeamsPoints: req.body.autoSwitchTeamsPoints,
     maxPoints: req.body.maxPoints,
     playersPerTeam: req.body.playersPerTeam,
     extraCourts: [court],
     isLive: req.body.isLive,
-    matches: req.body.matches,
     players: req.body.players,
     joinCode,
     joinCodeExpiration: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -169,7 +167,7 @@ app.post('/game-days', async (req, res) => {
 })
 
 app.put('/game-days/join/:code', async (req, res) => {
-  const gameDay = await gameDaysCollection.findOne({
+  const gameDay = await getGameDaysCollection().findOne({
     joinCode: req.params.code,
     joinCodeExpiration: {
       $gt: new Date()
@@ -187,9 +185,10 @@ app.put('/game-days/join/:code', async (req, res) => {
     maxPoints: gameDay.maxPoints,
     playersPerTeam: gameDay.playersPerTeam,
     playingTeams: [],
+    matches: 0,
   }
 
-  await gameDaysCollection.updateOne({
+  await getGameDaysCollection().updateOne({
     _id: gameDay._id
   }, {
     $push: {
@@ -201,23 +200,24 @@ app.put('/game-days/join/:code', async (req, res) => {
   req.session.gameDayId = gameDay._id.toHexString();
   req.session.courtId = courtId.toHexString();
   res.status(200).json({
+    ...gameDay,
+    ...newCourt,
     id: gameDay._id,
     courtId,
     otherPlayingTeams: [
       ...gameDay.extraCourts?.map(court => court.playingTeams).flat() ?? [],
     ],
-    ...gameDay,
-    ...newCourt,
+    lastMatch: gameDay.extraCourts?.reduce((acc, court) => Math.max(acc, court.matches), 0) ?? 0,
   })
 });
 
 app.get('/sessions/game-day', async (req, res) => {
   const id = req.session.gameDayId;
-  if (!id) {
+  if (!id || !req.session.courtId) {
     res.status(404).end();
     return;
   }
-  const gameDay = await gameDaysCollection.findOne({
+  const gameDay = await getGameDaysCollection().findOne({
     _id: new ObjectId(id),
     isLive: true,
   });
@@ -225,46 +225,32 @@ app.get('/sessions/game-day', async (req, res) => {
     res.status(404).end();
     return;
   }
-
-  const playersWithRatings = await getGameDayPlayersWithRatings(gameDay._id);
-  
-  if(req.session.courtId) {
-    const courtId = new ObjectId(req.session.courtId);
-    const court = gameDay.extraCourts?.find(court => court._id.equals(courtId));
-    if(!court) {
-      res.status(404).end();
-      return;
-    }
-    const otherPlayingTeams = gameDay.extraCourts?.filter(court => !court._id.equals(courtId)).map(court => court.playingTeams).flat() ?? [];
-
-    if(court) {
-      res.json({
-        id,
-        courtId,
-        otherPlayingTeams: [
-          ...otherPlayingTeams,
-        ],
-        ...gameDay,
-        ...court,
-        players: playersWithRatings,
-      });
-    }
+  const courtId = new ObjectId(req.session.courtId);
+  const court = gameDay.extraCourts?.find(court => court._id.equals(courtId));
+  if(!court) {
+    res.status(404).end();
     return;
   }
 
+  const playersWithRatings = await getGameDayPlayersWithRatings(gameDay._id);
+  const otherPlayingTeams = gameDay.extraCourts?.filter(court => !court._id.equals(courtId)).map(court => court.playingTeams).flat() ?? [];
+  const lastMatch = gameDay.extraCourts?.reduce((acc, court) => Math.max(acc, court.matches), 0) ?? 0;
+
   res.json({
-    id,
-    otherPlayingTeams:
-      gameDay.extraCourts?.map((court) => court.playingTeams).flat() ?? [],
     ...gameDay,
+    ...court,
+    id,
+    courtId,
+    lastMatch,
+    otherPlayingTeams,
     players: playersWithRatings,
   });
 });
 app.put('/sessions/game-day', async (req, res) => {
   const id = req.session.gameDayId;
   const courtId = req.session.courtId;
-  if (!id) {
-    res.status(404).end();
+  if (!id || !courtId) {
+    res.status(401).end();
     return;
   }
 
@@ -277,41 +263,26 @@ app.put('/sessions/game-day', async (req, res) => {
   }
 
 
-  if(courtId) {
-    const result = await gameDaysCollection.updateOne({
-      _id: new ObjectId(id),
-      "extraCourts._id": new ObjectId(courtId),
-    }, {
-      $set: {
-        "extraCourts.$.playingTeams": req.body.playingTeams,
-        "extraCourts.$.autoSwitchTeamsPoints": req.body.autoSwitchTeamsPoints,
-        "extraCourts.$.maxPoints": req.body.maxPoints,
-        "extraCourts.$.playersPerTeam": req.body.playersPerTeam,
-        players: req.body.players,
-        matches: req.body.matches,
-        isLive: req.body.isLive,
-      }
-    });
-
-    if(result.matchedCount === 0) {
-      res.status(404).end();
-      return;
-    }
-
-    res.status(200).end();
-    return;
-  }
-
-  const result = await gameDaysCollection.updateOne({
+  const result = await getGameDaysCollection().updateOne({
     _id: new ObjectId(id),
-  },
-  {
-    $set: req.body
+    "extraCourts._id": new ObjectId(courtId),
+  }, {
+    $set: {
+      "extraCourts.$.playingTeams": req.body.playingTeams,
+      "extraCourts.$.autoSwitchTeamsPoints": req.body.autoSwitchTeamsPoints,
+      "extraCourts.$.maxPoints": req.body.maxPoints,
+      "extraCourts.$.playersPerTeam": req.body.playersPerTeam,
+      "extraCourts.$.matches": req.body.matches,
+      players: req.body.players,
+      isLive: req.body.isLive,
+    }
   });
+
   if(result.matchedCount === 0) {
     res.status(404).end();
     return;
   }
+
   res.status(200).end();
 });
 
@@ -322,15 +293,17 @@ app.put('/sessions/game-day/leave', async (req, res) => {
   }
 
   // clean playing teams from court
-  const result = await gameDaysCollection
-    .updateOne({
+  const result = await getGameDaysCollection().updateOne(
+    {
       _id: new ObjectId(req.session.gameDayId),
       "extraCourts._id": new ObjectId(req.session.courtId),
-    }, {
+    },
+    {
       $set: {
         "extraCourts.$.playingTeams": [],
-      }
-    });
+      },
+    }
+  );
   if(result.matchedCount === 0) {
     res.status(404).end();
     return;
