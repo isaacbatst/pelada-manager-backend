@@ -206,7 +206,7 @@ app.put('/game-days/join/:code', async (req, res) => {
     id: gameDay._id,
     courtId,
     otherPlayingTeams: [
-      ...gameDay.extraCourts?.map(court => court.playingTeams).flat() ?? [],
+      ...gameDay.extraCourts?.filter(court => !court._id.equals(courtId)).map(court => court.playingTeams).flat() ?? [],
     ],
     lastMatch,
   })
