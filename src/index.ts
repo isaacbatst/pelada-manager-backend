@@ -78,6 +78,51 @@ app.use(session(sessionOptions));
 
 const gameDaysCollection = db.collection<GameDay>('game-days');
 
+const getGameDayPlayersWithRatings = async (gameDayId: ObjectId) => {
+  const result = gameDaysCollection.aggregate([
+    {
+      $match: {
+        _id: gameDayId,
+      },
+    },
+    {
+      $unwind: "$players", 
+    },
+    {
+      $lookup: {
+        from: "players",
+        localField: "players.name",
+        foreignField: "name",
+        as: "playerWithRating",
+      },
+    },
+    {
+      $unwind: "$playerWithRating",
+    },
+    {
+      $addFields: {
+        mergedPlayer: {
+          $mergeObjects: ["$players", "$playerWithRating"],
+        },
+      },
+    },
+    {
+      $group: {
+        _id: "$_id", 
+        players: {
+          $push: "$mergedPlayer",
+        },
+      },
+    },
+  ]);
+  if(!result.hasNext()) {
+    return [];
+  }
+
+  return (await result.next())?.players ?? [];
+}
+
+
 app.get('/game-days', async (req, res) => {
   const gameDays = await db.collection('game-days').find({}).sort({
     playedOn: -1
@@ -165,25 +210,8 @@ app.get('/sessions/game-day', async (req, res) => {
     return;
   }
 
-    const playersRatings = await db
-      .collection("players")
-      .find({
-        name: {
-          $in: gameDay.players.map((player) => player.name),
-        },
-      })
-      .toArray();
-    const playersWithRatings = gameDay.players.map((player) => {
-      const rating = playersRatings.find(
-        (rating) => rating.name === player.name
-      );
-      if (!rating) return player;
-      return {
-        ...player,
-        ...rating,
-      };
-    });
-
+  const playersWithRatings = await getGameDayPlayersWithRatings(gameDay._id);
+  
   if(req.session.courtId) {
     const courtId = new ObjectId(req.session.courtId);
     const court = gameDay.extraCourts?.find(court => court._id.equals(courtId));
@@ -329,6 +357,10 @@ app.get('/players', async (req, res) => {
 })
 
 app.put('/players/bulk', async (req, res) => {
+  const gameDayId = req.session.gameDayId;
+  if(!gameDayId) {
+    res.status(401).end();
+  }
   const bulk = db.collection('players').initializeOrderedBulkOp();
   req.body.forEach((player: { name: string, mu: number, sigma: number }) => {
     bulk.find({ name : player.name }).upsert().updateOne({
