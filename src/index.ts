@@ -179,13 +179,14 @@ app.put('/game-days/join/:code', async (req, res) => {
   }
 
   const courtId = new ObjectId();
+  const lastMatch = gameDay.extraCourts?.reduce((acc, court) => Math.max(acc, court.matches), 0) ?? 0;
   const newCourt = {
     _id: courtId,
     autoSwitchTeamsPoints: gameDay.autoSwitchTeamsPoints,
     maxPoints: gameDay.maxPoints,
     playersPerTeam: gameDay.playersPerTeam,
     playingTeams: [],
-    matches: 0,
+    matches: lastMatch + 1,
   }
 
   await getGameDaysCollection().updateOne({
@@ -207,7 +208,7 @@ app.put('/game-days/join/:code', async (req, res) => {
     otherPlayingTeams: [
       ...gameDay.extraCourts?.map(court => court.playingTeams).flat() ?? [],
     ],
-    lastMatch: gameDay.extraCourts?.reduce((acc, court) => Math.max(acc, court.matches), 0) ?? 0,
+    lastMatch,
   })
 });
 
