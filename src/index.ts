@@ -245,6 +245,7 @@ app.get('/sessions/game-day', async (req, res) => {
     lastMatch,
     otherPlayingTeams,
     players: playersWithRatings,
+    playersToNextGame: gameDay.playersToNextGame,
   });
 });
 app.put('/sessions/game-day', async (req, res) => {
@@ -275,6 +276,7 @@ app.put('/sessions/game-day', async (req, res) => {
       "extraCourts.$.matches": req.body.matches,
       players: req.body.players,
       isLive: req.body.isLive,
+      playersToNextGame: req.body.playersToNextGame,
     }
   });
 
