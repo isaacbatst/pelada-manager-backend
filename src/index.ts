@@ -154,6 +154,7 @@ app.post('/game-days', async (req, res) => {
     joinCode,
     joinCodeExpiration: new Date(Date.now() + 24 * 60 * 60 * 1000),
     playedOn: new Date(req.body.playedOn),
+    playersToNextGame: [],
   });
 
   req.session.gameDayId = created.insertedId.toHexString();
