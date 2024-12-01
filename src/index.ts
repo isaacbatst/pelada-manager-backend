@@ -154,6 +154,7 @@ app.post('/game-days', async (req, res) => {
     joinCode,
     joinCodeExpiration: new Date(Date.now() + 24 * 60 * 60 * 1000),
     playedOn: new Date(req.body.playedOn),
+    playersToNextGame: [],
   });
 
   req.session.gameDayId = created.insertedId.toHexString();
@@ -245,6 +246,7 @@ app.get('/sessions/game-day', async (req, res) => {
     lastMatch,
     otherPlayingTeams,
     players: playersWithRatings,
+    playersToNextGame: gameDay.playersToNextGame,
   });
 });
 app.put('/sessions/game-day', async (req, res) => {
@@ -275,6 +277,7 @@ app.put('/sessions/game-day', async (req, res) => {
       "extraCourts.$.matches": req.body.matches,
       players: req.body.players,
       isLive: req.body.isLive,
+      playersToNextGame: req.body.playersToNextGame,
     }
   });
 

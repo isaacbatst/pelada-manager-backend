@@ -20,6 +20,7 @@ export type GameDay = {
   playedOn: Date;
   joinCode: string;
   joinCodeExpiration: Date;
+  playersToNextGame: GameDayPlayer[];
   extraCourts?: {
     _id: ObjectId;
     maxPoints: number;
