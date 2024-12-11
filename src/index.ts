@@ -13,7 +13,7 @@ import MongoStore from 'connect-mongo';
 dotenv.config();
 
 const env = process.env.NODE_ENV || 'development';
-const corsOrigins = process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : ['http://127.0.0.1:5500', 'http://localhost:5500', 'https://duly-charming-whale.ngrok-free.app'];
+const corsOrigins = process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : ['http://127.0.0.1:5500', 'http://localhost:5500', 'https://duly-charming-whale.ngrok-free.app', 'http://localhost:5173']
 const mongoUrl = process.env.MONGO_URL || 'mongodb://localhost:27017';
 const mongoDbName = process.env.MONGO_DB_NAME || 'pelada';
 const domain = process.env.COOKIE_DOMAIN || '';
@@ -46,7 +46,8 @@ io.on("connection", (socket) => {
 
 app.use(cors({
   origin: corsOrigins,
-  credentials: true
+  credentials: true,
+  exposedHeaders: ['set-cookie']
 }));
 
 app.use(express.json());
