@@ -214,6 +214,48 @@ app.put('/game-days/join/:code', async (req, res) => {
   })
 });
 
+app.put('/game-days/transfer/:code', async (req, res) => {
+  const gameDay = await getGameDaysCollection().findOne({
+    joinCode: req.params.code,
+    joinCodeExpiration: {
+      $gt: new Date()
+    }
+  });
+  if (!gameDay) {
+    res.status(404).end();
+    return;
+  }
+
+  // Get the main court (first court in extraCourts)
+  const mainCourt = gameDay.extraCourts?.[0];
+  if (!mainCourt) {
+    res.status(404).end();
+    return;
+  }
+
+  // Set the new client as the main court controller
+  req.session.gameDayId = gameDay._id.toHexString();
+  req.session.courtId = mainCourt._id.toHexString();
+
+  // Notify all other clients that they should disconnect
+  io.to(gameDay._id.toHexString()).emit('game-day:transferred');
+
+  const playersWithRatings = await getGameDayPlayersWithRatings(gameDay._id);
+  const otherPlayingTeams = gameDay.extraCourts?.slice(1).map(court => court.playingTeams).flat() ?? [];
+  const lastMatch = gameDay.extraCourts?.reduce((acc, court) => Math.max(acc, court.matches), 0) ?? 0;
+
+  res.status(200).json({
+    ...gameDay,
+    ...mainCourt,
+    id: gameDay._id,
+    courtId: mainCourt._id,
+    lastMatch,
+    otherPlayingTeams,
+    players: playersWithRatings,
+    playersToNextGame: gameDay.playersToNextGame,
+  });
+});
+
 app.get('/sessions/game-day', async (req, res) => {
   const id = req.session.gameDayId;
   if (!id || !req.session.courtId) {
