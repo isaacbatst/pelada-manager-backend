@@ -168,6 +168,52 @@ app.post('/game-days', async (req, res) => {
   });
 })
 
+app.post('/game-days/:id/restart', async (req, res) => {
+  const sourceGameDay = await getGameDaysCollection().findOne({
+    _id: new ObjectId(req.params.id),
+  });
+
+  if (!sourceGameDay) {
+    res.status(404).end();
+    return;
+  }
+
+  const joinCode = crypto.randomBytes(2).toString('hex').toUpperCase();
+  const mainCourt = sourceGameDay.extraCourts?.[0];
+
+  const court = {
+    _id: new ObjectId(),
+    autoSwitchTeamsPoints: sourceGameDay.autoSwitchTeamsPoints,
+    maxPoints: sourceGameDay.maxPoints,
+    playersPerTeam: sourceGameDay.playersPerTeam,
+    playingTeams: mainCourt?.playingTeams ?? [],
+    matches: mainCourt?.matches ?? 0,
+  };
+
+  const created = await getGameDaysCollection().insertOne({
+    _id: new ObjectId(),
+    autoSwitchTeamsPoints: sourceGameDay.autoSwitchTeamsPoints,
+    maxPoints: sourceGameDay.maxPoints,
+    playersPerTeam: sourceGameDay.playersPerTeam,
+    extraCourts: [court],
+    isLive: true,
+    players: sourceGameDay.players,
+    joinCode,
+    joinCodeExpiration: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    playedOn: sourceGameDay.playedOn,
+    playersToNextGame: sourceGameDay.playersToNextGame,
+  });
+
+  req.session.gameDayId = created.insertedId.toHexString();
+  req.session.courtId = court._id.toHexString();
+
+  res.status(201).json({
+    id: created.insertedId,
+    courtId: court._id,
+    joinCode,
+  });
+});
+
 app.put('/game-days/join/:code', async (req, res) => {
   const gameDay = await getGameDaysCollection().findOne({
     joinCode: req.params.code,
