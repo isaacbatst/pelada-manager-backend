@@ -5,5 +5,6 @@ declare module 'express-session' {
   interface SessionData {
     gameDayId: string;
     courtId?: string;
+    groupId?: string;
   }
 }
