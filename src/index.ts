@@ -5,13 +5,14 @@ import 'express-async-errors';
 import session, { SessionOptions } from 'express-session';
 import { Document, Filter, MongoClient, ObjectId } from "mongodb";
 import * as crypto from 'crypto';
-import { GameDay } from "./types";
+import { GameDay, GameGroup } from "./types";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import MongoStore from 'connect-mongo';
 
 dotenv.config();
 
+const SIX_MONTH_EXPIRATION = 180 * 24 * 60 * 60 * 1000;
 const env = process.env.NODE_ENV || 'development';
 const corsOrigins = process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : ['http://127.0.0.1:5500', 'http://localhost:5500', 'https://duly-charming-whale.ngrok-free.app', 'http://localhost:5173']
 const mongoUrl = process.env.MONGO_URL || 'mongodb://localhost:27017';
@@ -76,7 +77,10 @@ if(env === 'production') {
 }
 
 app.use(session(sessionOptions));
+
+const getGroupsCollection = () => db.collection<GameGroup>('groups');
 const getGameDaysCollection = () => db.collection<GameDay>('game-days');
+
 const getGameDayPlayersWithRatings = async (gameDayId: ObjectId) => {
   try {
     const result = await getGameDaysCollection().aggregate([
@@ -121,6 +125,211 @@ const getGameDayPlayersWithRatings = async (gameDayId: ObjectId) => {
   }
 }
 
+app.post('/groups', async (req, res) => {
+  const inviteCode = crypto.randomBytes(4).toString('hex').toUpperCase();
+
+  const group: GameGroup = {
+    _id: new ObjectId(),
+    name: req.body.name,
+    createdAt: new Date(),
+    inviteCode,
+    inviteCodeExpiration: new Date(Date.now() + SIX_MONTH_EXPIRATION),
+    players: req.body.players || [],
+  };
+
+  await getGroupsCollection().insertOne(group);
+
+  req.session.groupId = group._id.toHexString();
+
+  res.status(201).json({
+    id: group._id,
+    inviteCode,
+  });
+});
+
+app.get('/groups', async (req, res) => {
+  const groups = await getGroupsCollection().find({ deletedAt: { $exists: false } }).sort({ createdAt: -1 }).toArray();
+  res.json(groups.map(({ _id, ...data }) => ({
+    id: _id,
+    ...data,
+  })));
+});
+
+app.get('/groups/:id', async (req, res) => {
+  const group = await getGroupsCollection().findOne({ 
+    _id: new ObjectId(req.params.id),
+    deletedAt: { $exists: false }
+  });
+  if (!group) {
+    res.status(404).end();
+    return;
+  }
+  res.json({ id: group._id, ...group });
+});
+
+app.delete('/groups/:id', async (req, res) => {
+  const groupId = new ObjectId(req.params.id);
+
+  const result = await getGroupsCollection().updateOne(
+    { _id: groupId, deletedAt: { $exists: false } },
+    { $set: { deletedAt: new Date() } }
+  );
+
+  if (result.matchedCount === 0) {
+    res.status(404).end();
+    return;
+  }
+
+  res.status(204).end();
+});
+
+app.put('/groups/:id/restore', async (req, res) => {
+  const groupId = new ObjectId(req.params.id);
+
+  const result = await getGroupsCollection().updateOne(
+    { _id: groupId, deletedAt: { $exists: true } },
+    { $unset: { deletedAt: '' } }
+  );
+
+  if (result.matchedCount === 0) {
+    res.status(404).end();
+    return;
+  }
+
+  const group = await getGroupsCollection().findOne({ _id: groupId });
+  res.json({ id: group?._id, ...group });
+});
+
+app.put('/groups/join/:code', async (req, res) => {
+  const group = await getGroupsCollection().findOne({
+    inviteCode: req.params.code,
+    inviteCodeExpiration: { $gt: new Date() },
+    deletedAt: { $exists: false },
+  });
+
+  if (!group) {
+    res.status(404).end();
+    return;
+  }
+
+  req.session.groupId = group._id.toHexString();
+
+  res.json({ id: group._id, ...group });
+});
+
+app.get('/groups/:groupId/players', async (req, res) => {
+  const group = await getGroupsCollection().findOne({ 
+    _id: new ObjectId(req.params.groupId),
+    deletedAt: { $exists: false }
+  });
+  if (!group) {
+    res.status(404).end();
+    return;
+  }
+  res.json(group.players);
+});
+
+app.post('/groups/:groupId/players', async (req, res) => {
+  const groupId = new ObjectId(req.params.groupId);
+  const player = req.body;
+
+  const existing = await getGroupsCollection().findOne({
+    _id: groupId,
+    deletedAt: { $exists: false },
+    'players.name': player.name,
+  });
+
+  if (existing) {
+    res.status(409).json({ error: 'Player already exists in this group' });
+    return;
+  }
+
+  const result = await getGroupsCollection().updateOne(
+    { _id: groupId, deletedAt: { $exists: false } },
+    { $push: { players: player } }
+  );
+
+  if (result.matchedCount === 0) {
+    res.status(404).end();
+    return;
+  }
+
+  res.status(201).json(player);
+});
+
+app.get('/groups/:groupId/game-days', async (req, res) => {
+  const groupId = new ObjectId(req.params.groupId);
+
+  const group = await getGroupsCollection().findOne({ 
+    _id: groupId, 
+    deletedAt: { $exists: false } 
+  });
+  if (!group) {
+    res.status(404).end();
+    return;
+  }
+
+  const gameDays = await getGameDaysCollection()
+    .find({ groupId })
+    .sort({ playedOn: -1 })
+    .toArray();
+
+  res.json(gameDays.map(({ _id, ...data }) => ({
+    id: _id,
+    ...data,
+  })));
+});
+
+app.post('/groups/:groupId/game-days', async (req, res) => {
+  const groupId = new ObjectId(req.params.groupId);
+  const group = await getGroupsCollection().findOne({ 
+    _id: groupId,
+    deletedAt: { $exists: false }
+  });
+
+  if (!group) {
+    res.status(404).json({ error: 'Group not found' });
+    return;
+  }
+
+  const joinCode = crypto.randomBytes(2).toString('hex').toUpperCase();
+
+  const court = {
+    _id: new ObjectId(),
+    autoSwitchTeamsPoints: req.body.autoSwitchTeamsPoints,
+    maxPoints: req.body.maxPoints,
+    playersPerTeam: req.body.playersPerTeam,
+    playingTeams: req.body.playingTeams,
+    matches: 0,
+  };
+
+  const gameDay: GameDay = {
+    _id: new ObjectId(),
+    groupId,
+    autoSwitchTeamsPoints: req.body.autoSwitchTeamsPoints,
+    maxPoints: req.body.maxPoints,
+    playersPerTeam: req.body.playersPerTeam,
+    extraCourts: [court],
+    isLive: req.body.isLive,
+    players: req.body.players,
+    joinCode,
+    joinCodeExpiration: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    playedOn: new Date(req.body.playedOn),
+    playersToNextGame: [],
+  };
+
+  await getGameDaysCollection().insertOne(gameDay);
+
+  req.session.gameDayId = gameDay._id.toHexString();
+  req.session.courtId = court._id.toHexString();
+  req.session.groupId = groupId.toHexString();
+
+  res.status(201).json({
+    id: gameDay._id,
+    courtId: court._id,
+    joinCode,
+  });
+});
 
 app.get('/game-days', async (req, res) => {
   const gameDays = await db.collection('game-days').find({}).sort({
@@ -144,8 +353,26 @@ app.post('/game-days', async (req, res) => {
     matches: 0,
   }
 
+  // Se não tiver groupId, cria um grupo default
+  let groupId = req.body.groupId ? new ObjectId(req.body.groupId) : undefined;
+  if (!groupId) {
+    const now = new Date();
+    const formattedDate = now.toLocaleDateString('pt-BR');
+    const defaultGroup: GameGroup = {
+      _id: new ObjectId(),
+      name: `Pelada - Criado dia: ${formattedDate}`,
+      createdAt: now,
+      inviteCode: crypto.randomBytes(4).toString('hex').toUpperCase(),
+      inviteCodeExpiration: new Date(Date.now() + SIX_MONTH_EXPIRATION),
+      players: req.body.players || [],
+    };
+    await getGroupsCollection().insertOne(defaultGroup);
+    groupId = defaultGroup._id;
+  }
+
   const created = await getGameDaysCollection().insertOne({
     _id: new ObjectId(),
+    groupId,
     autoSwitchTeamsPoints: req.body.autoSwitchTeamsPoints,
     maxPoints: req.body.maxPoints,
     playersPerTeam: req.body.playersPerTeam,
@@ -160,6 +387,7 @@ app.post('/game-days', async (req, res) => {
 
   req.session.gameDayId = created.insertedId.toHexString();
   req.session.courtId = court._id.toHexString();
+  req.session.groupId = groupId.toHexString();
   
   res.status(201).json({
     id: created.insertedId,
@@ -192,6 +420,7 @@ app.post('/game-days/:id/restart', async (req, res) => {
 
   const created = await getGameDaysCollection().insertOne({
     _id: new ObjectId(),
+    groupId: sourceGameDay.groupId,
     autoSwitchTeamsPoints: sourceGameDay.autoSwitchTeamsPoints,
     maxPoints: sourceGameDay.maxPoints,
     playersPerTeam: sourceGameDay.playersPerTeam,
@@ -206,6 +435,7 @@ app.post('/game-days/:id/restart', async (req, res) => {
 
   req.session.gameDayId = created.insertedId.toHexString();
   req.session.courtId = court._id.toHexString();
+  req.session.groupId = sourceGameDay.groupId.toHexString();
 
   res.status(201).json({
     id: created.insertedId,
@@ -282,6 +512,7 @@ app.put('/game-days/transfer/:code', async (req, res) => {
   // Set the new client as the main court controller
   req.session.gameDayId = gameDay._id.toHexString();
   req.session.courtId = mainCourt._id.toHexString();
+  req.session.groupId = gameDay.groupId.toHexString();
 
   // Notify all other clients that they should disconnect
   io.to(gameDay._id.toHexString()).emit('game-day:transferred');

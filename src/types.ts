@@ -10,8 +10,19 @@ type GameDayPlayer = {
   order: number;
 }
 
+export type GameGroup = {
+  _id: ObjectId;
+  name: string;
+  createdAt: Date;
+  inviteCode: string;
+  inviteCodeExpiration: Date;
+  players: GameDayPlayer[];
+  deletedAt?: Date;
+}
+
 export type GameDay = {
   _id: ObjectId;
+  groupId: ObjectId;
   maxPoints: number;
   playersPerTeam: string;
   players: GameDayPlayer[];
